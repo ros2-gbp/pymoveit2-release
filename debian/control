@@ -1,0 +1,12 @@
+Source: ros-humble-pymoveit2
+Section: misc
+Priority: optional
+Maintainer: Andrej Orsula <orsula.andrej@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-humble-ament-cmake, ros-humble-ament-cmake-python, ros-humble-ros-workspace
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-humble-pymoveit2
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-humble-action-msgs, ros-humble-control-msgs, ros-humble-geometry-msgs, ros-humble-moveit-msgs, ros-humble-rclpy, ros-humble-sensor-msgs, ros-humble-shape-msgs, ros-humble-std-srvs, ros-humble-trajectory-msgs, ros-humble-ros-workspace
+Description: Basic Python interface for MoveIt 2 built on top of ROS 2 actions and services
