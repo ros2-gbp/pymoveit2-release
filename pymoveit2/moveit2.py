@@ -4,6 +4,7 @@ from enum import Enum
 from typing import Any, List, Optional, Tuple, Union
 
 import numpy as np
+import rclpy
 from action_msgs.msg import GoalStatus
 from geometry_msgs.msg import Point, Pose, PoseStamped, Quaternion
 from moveit_msgs.action import ExecuteTrajectory, MoveGroup
@@ -40,6 +41,8 @@ from sensor_msgs.msg import JointState
 from shape_msgs.msg import Mesh, MeshTriangle, SolidPrimitive
 from std_msgs.msg import Header, String
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+
+from pymoveit2.utils import enum_to_str
 
 
 class MoveIt2State(Enum):
@@ -108,6 +111,48 @@ class MoveIt2:
             self._node.get_logger().warn(
                 "Parameter `follow_joint_trajectory_action_name` is deprecated. `MoveIt2` uses the `execute_trajectory` action instead."
             )
+
+        self.__collision_object_publisher = self._node.create_publisher(
+            CollisionObject, "/collision_object", 10
+        )
+        self.__attached_collision_object_publisher = self._node.create_publisher(
+            AttachedCollisionObject, "/attached_collision_object", 10
+        )
+
+        self.__cancellation_pub = self._node.create_publisher(
+            String, "/trajectory_execution_event", 1
+        )
+
+        self.__joint_state_mutex = threading.Lock()
+        self.__joint_state = None
+        self.__new_joint_state_available = False
+        self.__move_action_goal = self.__init_move_action_goal(
+            frame_id=base_link_name,
+            group_name=group_name,
+            end_effector=end_effector_name,
+        )
+
+        # Flag to determine whether to execute trajectories via Move Group Action, or rather by calling
+        # the separate ExecuteTrajectory action
+        # Applies to `move_to_pose()` and `move_to_configuration()`
+        self.__use_move_group_action = use_move_group_action
+
+        # Flag that determines whether a new goal can be sent while the previous one is being executed
+        self.__ignore_new_calls_while_executing = ignore_new_calls_while_executing
+
+        # Store additional variables for later use
+        self.__joint_names = joint_names
+        self.__base_link_name = base_link_name
+        self.__end_effector_name = end_effector_name
+        self.__group_name = group_name
+
+        # Internal states that monitor the current motion requests and execution
+        self.__is_motion_requested = False
+        self.__is_executing = False
+        self.motion_suceeded = False
+        self.__execution_goal_handle = None
+        self.__last_error_code = None
+        self.__execution_mutex = threading.Lock()
 
         # Create subscriber for current joint states
         self._node.create_subscription(
@@ -240,6 +285,7 @@ class MoveIt2:
             callback_group=callback_group,
         )
         self.__planning_scene = None
+        self.__old_planning_scene = None
         self.__old_allowed_collision_matrix = None
 
         # Create a service for applying the planning scene
@@ -254,52 +300,6 @@ class MoveIt2:
             ),
             callback_group=callback_group,
         )
-
-        self.__collision_object_publisher = self._node.create_publisher(
-            CollisionObject, "/collision_object", 10
-        )
-        self.__attached_collision_object_publisher = self._node.create_publisher(
-            AttachedCollisionObject, "/attached_collision_object", 10
-        )
-
-        self.__cancellation_pub = self._node.create_publisher(
-            String, "/trajectory_execution_event", 1
-        )
-
-        self.__joint_state_mutex = threading.Lock()
-        self.__joint_state = None
-        self.__new_joint_state_available = False
-        self.__move_action_goal = self.__init_move_action_goal(
-            frame_id=base_link_name,
-            group_name=group_name,
-            end_effector=end_effector_name,
-        )
-
-        # Flag to determine whether to execute trajectories via Move Group Action, or rather by calling
-        # the separate ExecuteTrajectory action
-        # Applies to `move_to_pose()` and `move_to_configuration()`
-        self.__use_move_group_action = use_move_group_action
-
-        # Flag that determines whether a new goal can be sent while the previous one is being executed
-        self.__ignore_new_calls_while_executing = ignore_new_calls_while_executing
-
-        # Store additional variables for later use
-        self.__joint_names = joint_names
-        self.__base_link_name = base_link_name
-        self.__end_effector_name = end_effector_name
-        self.__group_name = group_name
-
-        # Internal states that monitor the current motion requests and execution
-        self.__is_motion_requested = False
-        self.__is_executing = False
-        self.motion_suceeded = False
-        self.__execution_goal_handle = None
-        self.__last_error_code = None
-        self.__wait_until_executed_rate = self._node.create_rate(1000.0)
-        self.__execution_mutex = threading.Lock()
-
-        # Event that enables waiting until async future is done
-        self.__future_done_event = threading.Event()
 
     #### Execution Polling Functions
     def query_state(self) -> MoveIt2State:
@@ -523,10 +523,8 @@ class MoveIt2:
         if future is None:
             return None
 
-        # 100ms sleep
-        rate = self._node.create_rate(10)
         while not future.done():
-            rate.sleep()
+            rclpy.spin_once(self._node, timeout_sec=1.0)
 
         return self.get_trajectory(
             future,
@@ -631,14 +629,24 @@ class MoveIt2:
                 tolerance=tolerance_joint_position,
                 weight=weight_joint_position,
             )
-
         # Define starting state for the plan (default to the current state)
+        while start_joint_state is None:
+            self._node._logger.warn(message="Joint states are not available yet!")
+            if self.__joint_state is not None:
+                start_joint_state = self.__joint_state
+                break
+            else:
+                rclpy.spin_once(self._node, timeout_sec=1.0)
+        self._node._logger.info(message="Joint states are available now")
+
+        # Ensure the request actually uses the intended start state
         if start_joint_state is not None:
             if isinstance(start_joint_state, JointState):
                 self.__move_action_goal.request.start_state.joint_state = (
                     start_joint_state
                 )
             else:
+                # start_joint_state is a list of positions
                 self.__move_action_goal.request.start_state.joint_state = (
                     init_joint_state(
                         joint_names=self.__joint_names,
@@ -646,6 +654,7 @@ class MoveIt2:
                     )
                 )
         elif self.joint_state is not None:
+            # Default to the latest observed state if none provided
             self.__move_action_goal.request.start_state.joint_state = self.joint_state
 
         # Plan trajectory asynchronously by service call
@@ -702,7 +711,7 @@ class MoveIt2:
                     return None
             else:
                 self._node.get_logger().warn(
-                    f"Planning failed! Error code: {res.error_code.val}."
+                    f"Planning failed! Error code: {enum_to_str(MoveItErrorCodes, res.error_code.val)}"
                 )
                 return None
 
@@ -712,7 +721,7 @@ class MoveIt2:
             return res.trajectory.joint_trajectory
         else:
             self._node.get_logger().warn(
-                f"Planning failed! Error code: {res.error_code.val}."
+                f"Planning failed! Error code: {enum_to_str(MoveItErrorCodes, res.error_code.val)}"
             )
             return None
 
@@ -753,12 +762,13 @@ class MoveIt2:
             return False
 
         while self.__is_motion_requested or self.__is_executing:
-            self.__wait_until_executed_rate.sleep()
+            rclpy.spin_once(self._node, timeout_sec=1.0)
 
         return self.motion_suceeded
 
     def reset_controller(
-        self, joint_state: Union[JointState, List[float]], sync: bool = True
+        self,
+        joint_state: Union[JointState, List[float]],
     ):
         """
         Reset controller to a given `joint_state` by sending a dummy joint trajectory.
@@ -775,10 +785,7 @@ class MoveIt2:
             joint_trajectory=joint_trajectory
         )
 
-        self._send_goal_async_execute_trajectory(
-            goal=execute_trajectory_goal,
-            wait_until_response=sync,
-        )
+        self._send_goal_async_execute_trajectory(goal=execute_trajectory_goal)
 
     def set_pose_goal(
         self,
@@ -1196,10 +1203,8 @@ class MoveIt2:
         if future is None:
             return None
 
-        # 100ms sleep
-        rate = self._node.create_rate(10)
         while not future.done():
-            rate.sleep()
+            rclpy.spin_once(self._node, timeout_sec=1.0)
 
         return self.get_compute_fk_result(future, fk_link_names=fk_link_names)
 
@@ -1263,7 +1268,7 @@ class MoveIt2:
 
         stamp = self._node.get_clock().now().to_msg()
         self.__compute_fk_req.header.stamp = stamp
-
+        self.__compute_fk_client.wait_for_service(timeout_sec=3.0)
         if not self.__compute_fk_client.service_is_ready():
             self._node.get_logger().warn(
                 f"Service '{self.__compute_fk_client.srv_name}' is not yet available. Better luck next time!"
@@ -1276,6 +1281,7 @@ class MoveIt2:
         self,
         position: Union[Point, Tuple[float, float, float]],
         quat_xyzw: Union[Quaternion, Tuple[float, float, float, float]],
+        ik_link_name: Optional[str] = None,
         start_joint_state: Optional[Union[JointState, List[float]]] = None,
         constraints: Optional[Constraints] = None,
         wait_for_server_timeout_sec: Optional[float] = 1.0,
@@ -1290,10 +1296,8 @@ class MoveIt2:
         if future is None:
             return None
 
-        # 10ms sleep
-        rate = self._node.create_rate(10)
         while not future.done():
-            rate.sleep()
+            rclpy.spin_once(self._node, timeout_sec=1.0)
 
         return self.get_compute_ik_result(future)
 
@@ -1317,7 +1321,7 @@ class MoveIt2:
             return res.solution.joint_state
         else:
             self._node.get_logger().warn(
-                f"IK computation failed! Error code: {res.error_code.val}."
+                f"IK computation failed! Error code: {enum_to_str(MoveItErrorCodes, res.error_code.val)}"
             )
             return None
 
@@ -1325,14 +1329,17 @@ class MoveIt2:
         self,
         position: Union[Point, Tuple[float, float, float]],
         quat_xyzw: Union[Quaternion, Tuple[float, float, float, float]],
+        ik_link_name: Optional[str] = None,
         start_joint_state: Optional[Union[JointState, List[float]]] = None,
         constraints: Optional[Constraints] = None,
         wait_for_server_timeout_sec: Optional[float] = 1.0,
     ) -> Optional[Future]:
         """
-        Compute inverse kinematics for the given pose. To indicate beginning of the search space,
-        `start_joint_state` can be specified. Furthermore, `constraints` can be imposed on the
-        computed IK.
+        Compute inverse kinematics for the given pose.
+        ik_link_name can indicate the link for which IK shall be computed.
+        To indicate beginning of the search space, `start_joint_state` can be specified.
+        Furthermore, `constraints` can be imposed on the computed IK.
+          - `ik_link_name` defaults to last link in planning group which is specified by the group_name
           - `start_joint_state` defaults to current joint state.
           - `constraints` defaults to None.
         """
@@ -1368,6 +1375,9 @@ class MoveIt2:
                 quat_xyzw[3]
             )
 
+        if ik_link_name is not None:
+            self.__compute_ik_req.ik_request.ik_link_name = ik_link_name
+
         if start_joint_state is not None:
             if isinstance(start_joint_state, JointState):
                 self.__compute_ik_req.ik_request.robot_state.joint_state = (
@@ -1388,7 +1398,7 @@ class MoveIt2:
 
         stamp = self._node.get_clock().now().to_msg()
         self.__compute_ik_req.ik_request.pose_stamped.header.stamp = stamp
-
+        self.__compute_ik_client.wait_for_service(timeout_sec=3.0)
         if not self.__compute_ik_client.wait_for_service(
             timeout_sec=wait_for_server_timeout_sec
         ):
@@ -1699,9 +1709,15 @@ class MoveIt2:
         # Scale the mesh
         if isinstance(scale, float):
             scale = (scale, scale, scale)
-        transform = np.eye(4)
-        np.fill_diagonal(transform, scale)
-        mesh.apply_transform(transform)
+        if not (scale[0] == scale[1] == scale[2] == 1.0):
+            # If the mesh was passed in as a parameter, make a copy of it to
+            # avoid transforming the original.
+            if filepath is None:
+                mesh = mesh.copy()
+            # Transform the mesh
+            transform = np.eye(4)
+            np.fill_diagonal(transform, scale)
+            mesh.apply_transform(transform)
 
         msg.meshes.append(
             Mesh(
@@ -1819,7 +1835,7 @@ class MoveIt2:
         Gets the current planning scene. Returns whether the service call was
         successful.
         """
-
+        self._get_planning_scene_service.wait_for_service(timeout_sec=3.0)
         if not self._get_planning_scene_service.service_is_ready():
             self._node.get_logger().warn(
                 f"Service '{self._get_planning_scene_service.srv_name}' is not yet available. Better luck next time!"
@@ -1870,6 +1886,7 @@ class MoveIt2:
             allowed_collision_matrix.entry_values[j] = allowed_collision_entry
 
         # Apply the new planning scene
+        self._apply_planning_scene_service.wait_for_service(timeout_sec=3.0)
         if not self._apply_planning_scene_service.service_is_ready():
             self._node.get_logger().warn(
                 f"Service '{self._apply_planning_scene_service.srv_name}' is not yet available. Better luck next time!"
@@ -1895,6 +1912,55 @@ class MoveIt2:
             self.__planning_scene.allowed_collision_matrix = (
                 self.__old_allowed_collision_matrix
             )
+
+        return resp.success
+
+    def clear_all_collision_objects(self) -> Optional[Future]:
+        """
+        Removes all attached and un-attached collision objects from the planning scene.
+
+        Returns a future for the ApplyPlanningScene service call.
+        """
+        # Update the planning scene
+        if not self.update_planning_scene():
+            return None
+        self.__old_planning_scene = copy.deepcopy(self.__planning_scene)
+
+        # Remove all collision objects from the planning scene
+        self.__planning_scene.world.collision_objects = []
+        self.__planning_scene.robot_state.attached_collision_objects = []
+
+        # Apply the new planning scene
+        self._apply_planning_scene_service.wait_for_service(timeout_sec=3.0)
+        if not self._apply_planning_scene_service.service_is_ready():
+            self._node.get_logger().warn(
+                f"Service '{self._apply_planning_scene_service.srv_name}' is not yet available. Better luck next time!"
+            )
+            return None
+        return self._apply_planning_scene_service.call_async(
+            ApplyPlanningScene.Request(scene=self.__planning_scene)
+        )
+
+    def cancel_clear_all_collision_objects_future(self, future: Future):
+        """
+        Cancel the clear all collision objects service call.
+        """
+        self._apply_planning_scene_service.remove_pending_request(future)
+
+    def process_clear_all_collision_objects_future(self, future: Future) -> bool:
+        """
+        Return whether the clear all collision objects service call is done and has succeeded
+        or not. If it failed, restore the old planning scene.
+        """
+        if not future.done():
+            return False
+
+        # Get response
+        resp = future.result()
+
+        # If it failed, restore the old planning scene
+        if not resp.success:
+            self.__planning_scene = self.__old_planning_scene
 
         return resp.success
 
@@ -1926,7 +1992,7 @@ class MoveIt2:
                 position_constraint.header.stamp = stamp
             for orientation_constraint in constraints.orientation_constraints:
                 orientation_constraint.header.stamp = stamp
-
+        self._plan_kinematic_path_service.wait_for_service(timeout_sec=3.0)
         if not self._plan_kinematic_path_service.service_is_ready():
             self._node.get_logger().warn(
                 f"Service '{self._plan_kinematic_path_service.srv_name}' is not yet available. Better luck next time!"
@@ -1997,7 +2063,7 @@ class MoveIt2:
         )
 
         self.__cartesian_path_request.waypoints = [target_pose]
-
+        self._plan_cartesian_path_service.wait_for_service(timeout_sec=3.0)
         if not self._plan_cartesian_path_service.service_is_ready():
             self._node.get_logger().warn(
                 f"Service '{self._plan_cartesian_path_service.srv_name}' is not yet available. Better luck next time!"
@@ -2055,7 +2121,7 @@ class MoveIt2:
         self.__execution_mutex.acquire()
         if res.result().status != GoalStatus.STATUS_SUCCEEDED:
             self._node.get_logger().warn(
-                f"Action '{self.__move_action_client._action_name}' was unsuccessful: {res.result().status}."
+                f"Action '{self.__move_action_client._action_name}' was unsuccessful: {enum_to_str(GoalStatus, res.result().status)}."
             )
             self.motion_suceeded = False
         else:
@@ -2070,7 +2136,6 @@ class MoveIt2:
     def _send_goal_async_execute_trajectory(
         self,
         goal: ExecuteTrajectory,
-        wait_until_response: bool = False,
     ):
         self.__execution_mutex.acquire()
 
@@ -2114,14 +2179,11 @@ class MoveIt2:
         )
         self.__execution_mutex.release()
 
-    def __response_callback_with_event_set_execute_trajectory(self, response):
-        self.__future_done_event.set()
-
     def __result_callback_execute_trajectory(self, res):
         self.__execution_mutex.acquire()
         if res.result().status != GoalStatus.STATUS_SUCCEEDED:
             self._node.get_logger().warn(
-                f"Action '{self._execute_trajectory_action_client._action_name}' was unsuccessful: {res.result().status}."
+                f"Action '{self._execute_trajectory_action_client._action_name}' was unsuccessful: {enum_to_str(GoalStatus, res.result().status)}."
             )
             self.motion_suceeded = False
         else:
@@ -2329,6 +2391,44 @@ class MoveIt2:
     @planner_id.setter
     def planner_id(self, value: str):
         self.__move_action_goal.request.planner_id = value
+
+    def set_workspace_parameters(
+        self,
+        min_corner: Tuple[float, float, float],
+        max_corner: Tuple[float, float, float],
+        frame_id: Optional[str] = None,
+    ):
+        """
+        Set the workspace parameters (min/max corners and optionally frame_id) for planning.
+        - min_corner: (x, y, z) tuple for the minimum workspace corner
+        - max_corner: (x, y, z) tuple for the maximum workspace corner
+        - frame_id: reference frame for the workspace (defaults to base link if not provided)
+        """
+        # Set workspace parameters for the main move action goal
+        ws = self.__move_action_goal.request.workspace_parameters
+        ws.min_corner.x, ws.min_corner.y, ws.min_corner.z = min_corner
+        ws.max_corner.x, ws.max_corner.y, ws.max_corner.z = max_corner
+        if frame_id is not None:
+            ws.header.frame_id = frame_id
+
+        # Also ensure the kinematic path request has the same workspace parameters
+        # This is a safety measure in case the kinematic path request gets recreated
+        if hasattr(self, "_plan_kinematic_path_service"):
+            kinematic_ws = (
+                self.__kinematic_path_request.motion_plan_request.workspace_parameters
+            )
+            (
+                kinematic_ws.min_corner.x,
+                kinematic_ws.min_corner.y,
+                kinematic_ws.min_corner.z,
+            ) = min_corner
+            (
+                kinematic_ws.max_corner.x,
+                kinematic_ws.max_corner.y,
+                kinematic_ws.max_corner.z,
+            ) = max_corner
+            if frame_id is not None:
+                kinematic_ws.header.frame_id = frame_id
 
 
 def init_joint_state(
