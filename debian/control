@@ -1,0 +1,12 @@
+Source: ros-lyrical-pymoveit2
+Section: misc
+Priority: optional
+Maintainer: Andrej Orsula <orsula.andrej@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), ros-lyrical-ament-cmake, ros-lyrical-ament-cmake-python, ros-lyrical-ros-workspace
+Homepage: https://index.ros.org/p/pymoveit2/#lyrical
+Standards-Version: 3.9.2
+
+Package: ros-lyrical-pymoveit2
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-lyrical-action-msgs, ros-lyrical-control-msgs, ros-lyrical-geometry-msgs, ros-lyrical-moveit-msgs, ros-lyrical-rclpy, ros-lyrical-sensor-msgs, ros-lyrical-shape-msgs, ros-lyrical-std-srvs, ros-lyrical-trajectory-msgs, ros-lyrical-ros-workspace
+Description: Basic Python interface for MoveIt 2 built on top of ROS 2 actions and services
