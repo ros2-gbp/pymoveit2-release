@@ -1,3 +1,26 @@
+## pymoveit2 (humble) - 5.0.0-1
+
+The packages in the `pymoveit2` repository were released into the `humble` distro by running `/usr/bin/bloom-release --no-web -y -r humble -t humble pymoveit2` on `Wed, 16 Sep 2026 15:42:43 -0000`
+
+The `pymoveit2` package was released.
+
+Version of package(s) in repository `pymoveit2`:
+
+- upstream repository: https://github.com/AndrejOrsula/pymoveit2.git
+- release repository: https://github.com/ros2-gbp/pymoveit2-release.git
+- rosdistro version: `4.2.0-1`
+- old version: `4.2.0-1`
+- new version: `5.0.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.10.7`
+- catkin_pkg version: `0.4.24`
+- rosdep version: `0.21.0`
+- rosdistro version: `0.8.3`
+- vcstools version: `0.1.42`
+
+
 ## pymoveit2 (rolling) - 4.2.0-1
 
 The packages in the `pymoveit2` repository were released into the `rolling` distro by running `/usr/bin/bloom-release pymoveit2 --rosdistro rolling` on `Fri, 31 Oct 2025 08:50:23 -0000`
