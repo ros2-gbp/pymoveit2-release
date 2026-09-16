@@ -1,0 +1,12 @@
+Source: ros-rolling-pymoveit2
+Section: misc
+Priority: optional
+Maintainer: "Andrej Orsula" <orsula.andrej@gmail.com>
+Build-Depends: debhelper (>= 9.0.0), python3-pytest <!nocheck>, ros-rolling-ament-cmake, ros-rolling-ament-cmake-pytest <!nocheck>, ros-rolling-ament-cmake-python, ros-rolling-ros-workspace
+Homepage: https://index.ros.org/p/pymoveit2/#rolling
+Standards-Version: 3.9.2
+
+Package: ros-rolling-pymoveit2
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libgeometry-msgs-dev, libsensor-msgs-dev, libshape-msgs-dev, libstd-msgs-dev, libstd-srvs-dev, libtrajectory-msgs-dev, python3-geometry-msgs, python3-numpy, python3-sensor-msgs, python3-shape-msgs, python3-std-msgs, python3-std-srvs, python3-trajectory-msgs, ros-geometry-msgs, ros-rolling-action-msgs, ros-rolling-control-msgs, ros-rolling-moveit-msgs, ros-rolling-rcl-interfaces, ros-rolling-rclpy, ros-sensor-msgs, ros-shape-msgs, ros-std-msgs, ros-std-srvs, ros-trajectory-msgs, ros-rolling-ros-workspace
+Description: Basic Python interface for MoveIt 2 built on top of ROS 2 actions and services
