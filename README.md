@@ -1,7 +1,6 @@
 # pymoveit2
 
-[![ci](https://github.com/AndrejOrsula/pymoveit2/actions/workflows/ci.yml/badge.svg)](https://github.com/AndrejOrsula/pymoveit2/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/AndrejOrsula/pymoveit2/graph/badge.svg)](https://codecov.io/gh/AndrejOrsula/pymoveit2)
+[![codecov](https://codecov.io/gh/AndrejOrsula/pymoveit2/branch/main/graph/badge.svg?token=1F2GXZTY0J)](https://codecov.io/gh/AndrejOrsula/pymoveit2/tree/main)
 
 > Move a robot from Python by communicating with MoveIt 2 over ROS 2 actions and services
 
@@ -9,10 +8,10 @@
 <table>
 <tbody>
   <tr>
-    <td width="25%"><img width="100%" src="https://user-images.githubusercontent.com/22929099/147369355-5f1b33ef-2e18-4042-9ea3-cd85b1a78fa0.gif" alt="Animation of ex_joint_goal.py"/></td>
-    <td width="25%"><img width="100%" src="https://user-images.githubusercontent.com/22929099/147369356-b8ad2f4c-1996-47ac-9bfb-7fccd243fd56.gif" alt="Animation of ex_pose_goal.py"/></td>
-    <td width="25%"><img width="100%" src="https://user-images.githubusercontent.com/22929099/147369354-640831e2-4661-4f3d-8fc2-3e97d7766e1a.gif" alt="Animation of ex_gripper.py"/></td>
-    <td width="25%"><img width="100%" src="https://user-images.githubusercontent.com/22929099/147374152-50128188-ab73-4d55-a537-b641325ce9c6.gif" alt="Animation of ex_servo.py"/></td>
+    <td width="25%"><a href="https://AndrejOrsula.github.io/pymoveit2"><img width="100%" src="https://user-images.githubusercontent.com/22929099/147369355-5f1b33ef-2e18-4042-9ea3-cd85b1a78fa0.gif" alt="Animation of ex_joint_goal.py"/></a></td>
+    <td width="25%"><a href="https://AndrejOrsula.github.io/pymoveit2"><img width="100%" src="https://user-images.githubusercontent.com/22929099/147369356-b8ad2f4c-1996-47ac-9bfb-7fccd243fd56.gif" alt="Animation of ex_pose_goal.py"/></a></td>
+    <td width="25%"><a href="https://AndrejOrsula.github.io/pymoveit2"><img width="100%" src="https://user-images.githubusercontent.com/22929099/147369354-640831e2-4661-4f3d-8fc2-3e97d7766e1a.gif" alt="Animation of ex_gripper.py"/></a></td>
+    <td width="25%"><a href="https://AndrejOrsula.github.io/pymoveit2"><img width="100%" src="https://user-images.githubusercontent.com/22929099/147374152-50128188-ab73-4d55-a537-b641325ce9c6.gif" alt="Animation of ex_servo.py"/></a></td>
   </tr>
   <tr>
     <td width="25%"><div align="center">Joint Configuration</div></td>
@@ -26,25 +25,36 @@
 
 ## Installation
 
-| **`humble`** | **`jazzy`** | **`lyrical`** | **`rolling`** |
-| :----------: | :---------: | :-----------: | :-----------: |
-| ✅ | ✅ | ✅ | ✅ |
+### Binary package
 
-<!--
-### Binary package (apt)
+[![ROS Package Index](https://img.shields.io/ros/v/humble/pymoveit2?logo=ros&label=Humble&color=5F9936)](https://index.ros.org/p/pymoveit2/#humble)
+[![ROS Package Index](https://img.shields.io/ros/v/jazzy/pymoveit2?logo=ros&label=Jazzy&color=E04A26)](https://index.ros.org/p/pymoveit2/#jazzy)
+[![ROS Package Index](https://img.shields.io/ros/v/lyrical/pymoveit2?logo=ros&label=Lyrical&color=C2185B)](https://index.ros.org/p/pymoveit2/#lyrical)
+[![ROS Package Index](https://img.shields.io/ros/v/rolling/pymoveit2?logo=ros&label=Rolling&color=00A3A6)](https://index.ros.org/p/pymoveit2/#rolling)
 
 ```bash
 sudo apt install ros-$ROS_DISTRO-pymoveit2
 ```
--->
 
-### Python package (PyPI)
+### Python package
+
+[![PyPi](https://img.shields.io/pypi/v/pymoveit2?logo=python&label=PyPI)](https://pypi.python.org/pypi/pymoveit2)
 
 ```bash
 pip install pymoveit2
 ```
 
-### Source build (colcon)
+### Docker image
+
+[![Docker](https://img.shields.io/docker/v/andrejorsula/pymoveit2?sort=semver&logo=docker&label=Docker)](https://hub.docker.com/r/andrejorsula/pymoveit2/tags)
+
+```bash
+cd $WS
+git clone https://github.com/AndrejOrsula/pymoveit2.git
+pymoveit2/.docker/run.bash $ROS_DISTRO --network-host --ipc-host --gui
+```
+
+### Source build
 
 ```bash
 cd $COLCON_WS
@@ -52,14 +62,6 @@ git clone https://github.com/AndrejOrsula/pymoveit2.git src/pymoveit2
 rosdep install -y -r -i --rosdistro $ROS_DISTRO --from-paths src/pymoveit2
 colcon build --merge-install --symlink-install --cmake-args "-DCMAKE_BUILD_TYPE=Release"
 source install/local_setup.bash
-```
-
-### Docker image
-
-```bash
-cd $WS
-git clone https://github.com/AndrejOrsula/pymoveit2.git
-pymoveit2/.docker/run.bash $ROS_DISTRO --network-host --ipc-host --gui
 ```
 
 ## Quick start (demo with Franka Emika Panda)
