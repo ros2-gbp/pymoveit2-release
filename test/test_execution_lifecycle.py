@@ -1,10 +1,14 @@
 import threading
+import time
 
+import rclpy
 from action_msgs.msg import GoalStatus
 from conftest import PANDA_JOINTS, FakeActionClient, complete
-from moveit_msgs.action import ExecuteTrajectory
+from moveit_msgs.action import ExecuteTrajectory, MoveGroup
 from moveit_msgs.msg import MoveItErrorCodes
+from rclpy.action import ActionServer, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.executors import SingleThreadedExecutor
 from trajectory_msgs.msg import JointTrajectory
 
 from pymoveit2 import MoveIt2, MoveIt2State
@@ -119,6 +123,122 @@ def test_get_execution_future_returns_completed_future(moveit2, fake_execute_cli
     handle = fake_execute_client.accept()
     complete(handle, GoalStatus.STATUS_SUCCEEDED, _result())
     assert moveit2.get_execution_future() is handle.result_future
+
+
+def test_get_goal_future_exists_before_the_goal_is_accepted(
+    moveit2, fake_execute_client
+):
+    assert moveit2.get_goal_future() is None
+    moveit2.execute(_trajectory())
+    assert moveit2.query_state() == MoveIt2State.REQUESTING
+    assert moveit2.get_goal_future() is fake_execute_client.response_futures[-1]
+    assert moveit2.get_execution_future() is None
+
+
+def test_get_goal_future_resolves_to_the_goal_handle(moveit2, fake_execute_client):
+    moveit2.execute(_trajectory())
+    goal_future = moveit2.get_goal_future()
+    handle = fake_execute_client.accept()
+    assert goal_future.result() is handle
+    assert moveit2.get_goal_future() is goal_future
+    complete(handle, GoalStatus.STATUS_SUCCEEDED, _result())
+    assert moveit2.query_state() == MoveIt2State.IDLE
+    assert moveit2.get_goal_future() is goal_future
+
+
+def test_get_goal_future_returns_a_rejected_goal(moveit2, fake_execute_client):
+    moveit2.execute(_trajectory())
+    goal_future = moveit2.get_goal_future()
+    handle = fake_execute_client.reject()
+    assert moveit2.query_state() == MoveIt2State.IDLE
+    assert moveit2.get_goal_future() is goal_future
+    assert goal_future.result() is handle
+    assert moveit2.get_execution_future() is None
+
+
+def test_get_goal_future_follows_the_newest_goal(moveit2, fake_execute_client):
+    moveit2.execute(_trajectory())
+    moveit2.execute(_trajectory())
+    assert moveit2.get_goal_future() is fake_execute_client.response_futures[1]
+
+
+def test_get_goal_future_is_none_after_force_reset(moveit2, fake_execute_client):
+    moveit2.execute(_trajectory())
+    fake_execute_client.accept()
+    moveit2.force_reset_executing_state()
+    assert moveit2.get_goal_future() is None
+
+
+def test_get_goal_future_is_none_when_no_goal_was_sent(moveit2, fake_execute_client):
+    fake_execute_client.ready = False
+    assert moveit2.execute(_trajectory()) is False
+    assert moveit2.get_goal_future() is None
+
+
+def test_caller_spun_executor_follows_motions_through_the_goal_future(rclpy_node):
+    accept = [True]
+
+    def finish(goal_handle):
+        goal_handle.succeed()
+        return MoveGroup.Result(error_code=MoveItErrorCodes(val=1))
+
+    server_node = rclpy.create_node("pymoveit2_fake_move_group")
+    server = ActionServer(
+        server_node,
+        MoveGroup,
+        "/move_action",
+        finish,
+        goal_callback=lambda _: (
+            GoalResponse.ACCEPT if accept[0] else GoalResponse.REJECT
+        ),
+    )
+    server_executor = SingleThreadedExecutor()
+    server_executor.add_node(server_node)
+    server_thread = threading.Thread(target=server_executor.spin, daemon=True)
+    server_thread.start()
+
+    client_node = rclpy.create_node("pymoveit2_goal_future_client")
+    executor = SingleThreadedExecutor()
+    executor.add_node(client_node)
+    moveit2 = MoveIt2(
+        node=client_node,
+        joint_names=PANDA_JOINTS,
+        base_link_name="panda_link0",
+        end_effector_name="panda_hand",
+        group_name="panda_arm",
+        use_move_group_action=True,
+        ignore_new_calls_while_executing=True,
+    )
+
+    def move():
+        assert moveit2.move_to_configuration([0.0] * 7) is True
+        goal_future = moveit2.get_goal_future()
+        executor.spin_until_future_complete(goal_future, timeout_sec=10.0)
+        assert goal_future.done()
+        deadline = time.monotonic() + 10.0
+        while moveit2.query_state() != MoveIt2State.IDLE:
+            assert time.monotonic() < deadline
+            executor.spin_once(timeout_sec=0.05)
+        return goal_future.result().accepted
+
+    try:
+        assert moveit2._MoveIt2__move_action_client.wait_for_server(timeout_sec=10.0)
+        for _ in range(2):
+            assert move() is True
+            assert moveit2.motion_succeeded is True
+            assert moveit2.get_last_execution_error_code().val == 1
+        accept[0] = False
+        assert move() is False
+        assert moveit2.motion_succeeded is False
+        assert "rejected" in moveit2.last_failure()
+    finally:
+        moveit2.destroy()
+        executor.shutdown()
+        client_node.destroy_node()
+        server_executor.shutdown()
+        server_thread.join(timeout=5.0)
+        server.destroy()
+        server_node.destroy_node()
 
 
 def test_cancel_uses_goal_handle_and_stop_event(moveit2, fake_execute_client):
@@ -427,3 +547,178 @@ def test_context_manager(rclpy_node):
         group_name="panda_arm",
     ) as moveit2:
         assert moveit2.query_state() == MoveIt2State.IDLE
+
+
+class _RecordingLogger:
+    def __init__(self):
+        self.messages = []
+
+    def warning(self, message):
+        self.messages.append(("warning", message))
+
+    def error(self, message):
+        self.messages.append(("error", message))
+
+    def debug(self, message):
+        pass
+
+
+def _lifecycle(ignore_new_calls_while_executing=False):
+    settled = []
+    lifecycle = ActionLifecycle(
+        logger=_RecordingLogger(),
+        ignore_new_calls_while_executing=ignore_new_calls_while_executing,
+        on_settled=settled.append,
+    )
+    return lifecycle, settled
+
+
+class _RaisingReadinessClient(FakeActionClient):
+    def server_is_ready(self):
+        raise RuntimeError("discovery failed")
+
+
+def test_admit_records_one_failed_attempt_when_readiness_raises():
+    lifecycle, settled = _lifecycle()
+    client = _RaisingReadinessClient()
+    assert lifecycle.admit(client, _trajectory()) is None
+    assert client.sent_goals == []
+    assert lifecycle.query_state() == MoveIt2State.IDLE
+    assert len(settled) == 1 and settled[0].terminal
+    assert lifecycle.wait_until_executed(timeout_sec=0.0) is False
+
+
+def test_admit_records_one_failed_attempt_when_server_is_missing():
+    lifecycle, settled = _lifecycle()
+    client = FakeActionClient("fake_action", ready=False)
+    assert lifecycle.admit(client, _trajectory()) is None
+    assert client.sent_goals == []
+    assert len(settled) == 1 and settled[0].terminal
+    assert lifecycle.wait_until_executed(timeout_sec=0.0) is False
+    assert any(
+        level == "warning" and "'fake_action' is not yet available" in message
+        for level, message in lifecycle._logger.messages
+    )
+
+
+def test_admit_logs_nothing_when_the_server_is_ready():
+    lifecycle, _ = _lifecycle()
+    assert lifecycle.admit(FakeActionClient(), _trajectory()) is not None
+    assert lifecycle._logger.messages == []
+
+
+def test_admit_failure_while_busy_keeps_the_tracked_goal():
+    for failing in (_RaisingReadinessClient(), FakeActionClient(ready=False)):
+        lifecycle, settled = _lifecycle()
+        client = FakeActionClient()
+        tracked = lifecycle.admit(client, _trajectory())
+        client.accept()
+        assert lifecycle.admit(failing, _trajectory()) is None
+        assert lifecycle.current is tracked
+        assert lifecycle.query_state() == MoveIt2State.EXECUTING
+        assert settled == []
+
+
+def test_admit_refuses_without_sending_once_closed_or_disabled():
+    for shut, settles in (("close", 0), ("disable", 1)):
+        lifecycle, settled = _lifecycle()
+        client = FakeActionClient()
+        getattr(lifecycle, shut)()
+        assert lifecycle.admit(client, _trajectory()) is None
+        assert client.sent_goals == []
+        assert len(settled) == settles
+        assert lifecycle.query_state() == MoveIt2State.IDLE
+
+
+def test_a_disabled_refusal_supersedes_an_unreported_success():
+    lifecycle, settled = _lifecycle()
+    client = FakeActionClient()
+    assert lifecycle.admit(client, _trajectory()) is not None
+    complete(client.accept(), GoalStatus.STATUS_SUCCEEDED, _result())
+    lifecycle.disable()
+    assert lifecycle.admit(client, _trajectory()) is None
+    assert len(client.sent_goals) == 1
+    assert settled[-1].reason == "Interface is disabled. Skipping motion."
+    assert lifecycle.succeeded is False
+    assert lifecycle.wait_until_executed(timeout_sec=0.0) is False
+
+
+def test_admit_rechecks_admission_after_the_readiness_probe():
+    for shut in ("close", "disable"):
+        lifecycle, settled = _lifecycle()
+
+        class ShuttingClient(FakeActionClient):
+            def server_is_ready(self, shut=shut, lifecycle=lifecycle):
+                getattr(lifecycle, shut)()
+                return True
+
+        client = ShuttingClient()
+        assert lifecycle.admit(client, _trajectory()) is None
+        assert client.sent_goals == []
+        assert len(settled) == (shut == "disable")
+
+
+def test_admit_rechecks_busy_after_the_readiness_probe():
+    lifecycle, _ = _lifecycle(ignore_new_calls_while_executing=True)
+    other = FakeActionClient("other")
+
+    class RacingClient(FakeActionClient):
+        def server_is_ready(self):
+            assert lifecycle.admit(other, _trajectory()) is not None
+            return True
+
+    client = RacingClient()
+    assert lifecycle.admit(client, _trajectory()) is None
+    assert client.sent_goals == []
+    assert len(other.sent_goals) == 1
+    assert lifecycle.query_state() == MoveIt2State.REQUESTING
+
+
+def test_admit_refuses_while_busy_when_ignoring_new_calls():
+    lifecycle, _ = _lifecycle(ignore_new_calls_while_executing=True)
+    client = FakeActionClient()
+    tracked = lifecycle.admit(client, _trajectory())
+    assert lifecycle.admit(client, _trajectory()) is None
+    assert len(client.sent_goals) == 1
+    assert lifecycle.current is tracked
+
+
+def test_admit_settles_a_goal_whose_send_fails():
+    class RaisingSendClient(FakeActionClient):
+        def send_goal_async(self, goal, feedback_callback=None):
+            raise RuntimeError("transport down")
+
+    class NoFutureClient(FakeActionClient):
+        def send_goal_async(self, goal, feedback_callback=None):
+            return None
+
+    class Unwatchable:
+        def add_done_callback(self, _callback):
+            raise RuntimeError("callback rejected")
+
+    class UnwatchableClient(FakeActionClient):
+        def send_goal_async(self, goal, feedback_callback=None):
+            return Unwatchable()
+
+    for client in (RaisingSendClient(), NoFutureClient(), UnwatchableClient()):
+        lifecycle, settled = _lifecycle()
+        assert lifecycle.admit(client, _trajectory()) is None
+        assert lifecycle.query_state() == MoveIt2State.IDLE
+        assert len(settled) == 1 and settled[0].succeeded is False
+        assert lifecycle.wait_until_executed(timeout_sec=0.0) is False
+        assert lifecycle.admit(FakeActionClient(), _trajectory()) is not None
+
+
+def test_admit_tracks_the_send_future_and_its_response():
+    lifecycle, _ = _lifecycle()
+    client = FakeActionClient()
+    op = lifecycle.admit(client, _trajectory())
+    assert op is lifecycle.current
+    assert op.send_goal_future is client.response_futures[0]
+    assert lifecycle.query_state() == MoveIt2State.REQUESTING
+    handle = client.accept()
+    assert lifecycle.query_state() == MoveIt2State.EXECUTING
+    complete(handle, GoalStatus.STATUS_SUCCEEDED)
+    assert lifecycle.query_state() == MoveIt2State.IDLE
+    second = lifecycle.admit(client, _trajectory())
+    assert second.generation > op.generation
