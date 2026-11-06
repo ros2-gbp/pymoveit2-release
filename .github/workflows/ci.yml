@@ -73,7 +73,9 @@ jobs:
       CI_INSTALL_DIR: ${{ github.workspace }}/install/${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}-lyrical
       QUALITY_VENV: /tmp/pymoveit2-quality-venv
       COVERAGE_BRANCH_FAIL_UNDER: "65"
-      CODECOV_READY: ${{ secrets.CODECOV_TOKEN != '' || github.event.repository.private == false }}
+      # Codecov accepts tokenless uploads only from fork PRs to public repos;
+      # in-repo branches without the secret (e.g. Dependabot) skip the upload.
+      CODECOV_READY: ${{ secrets.CODECOV_TOKEN != '' || (github.event.repository.private == false && github.event.pull_request.head.repo.fork == true) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -122,7 +124,7 @@ jobs:
           ./.ci/scripts/check-coverage.bash
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() && contains(fromJSON('["success", "failure"]'), steps.coverage.outcome) && env.CODECOV_READY == 'true' }}
-        uses: codecov/codecov-action@v7.0.0
+        uses: codecov/codecov-action@v7.1.1
         with:
           working-directory: src/pymoveit2
           files: coverage-report/coverage.xml
@@ -143,7 +145,7 @@ jobs:
           fail_ci_if_error: true
       - name: Upload the coverage and type reports
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: quality-reports
           path: |
@@ -173,9 +175,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { ros: humble, trimesh: "trimesh<4" }
-          - { ros: jazzy, trimesh: "trimesh" }
+        ros: [humble, jazzy]
     container:
       image: ros:${{ matrix.ros }}-ros-base
     steps:
@@ -247,8 +247,9 @@ jobs:
             echo "::error::ex_collision_mesh.py must exit non-zero without trimesh."
             exit 1
           fi
-          python3 -m pip install --quiet --break-system-packages "${{ matrix.trimesh }}" 2>/dev/null \
-            || python3 -m pip install --quiet "${{ matrix.trimesh }}"
+          python3 -m pip install --quiet --break-system-packages \
+            -r "${GITHUB_WORKSPACE}/src/pymoveit2/.ci/requirements-trimesh.txt" 2>/dev/null \
+            || python3 -m pip install --quiet -r "${GITHUB_WORKSPACE}/src/pymoveit2/.ci/requirements-trimesh.txt"
           ros2 run pymoveit2 ex_collision_mesh.py --ros-args -p action:="add"
           ros2 run pymoveit2 ex_collision_mesh.py --ros-args -p action:="remove"
           ros2 run pymoveit2 ex_clear_planning_scene.py
@@ -329,7 +330,7 @@ jobs:
             bash test/scripts/run-integration.bash "${{ matrix.ros }}" -- -k live_servo -rs
       - name: Upload Servo launch logs
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: servo-live-${{ matrix.ros }}-${{ matrix.interface }}
           path: /tmp/pymoveit2-servo-live
@@ -368,7 +369,7 @@ jobs:
           PY
       - name: Upload the distributions
         if: always()
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: distributions
           path: packaging/dist
