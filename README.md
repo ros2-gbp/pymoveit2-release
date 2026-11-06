@@ -1,3 +1,26 @@
+## pymoveit2 (jazzy) - 5.1.0-1
+
+The packages in the `pymoveit2` repository were released into the `jazzy` distro by running `/home/runner/bloom-venv/bin/bloom-release --no-web -y --rosdistro jazzy --track jazzy pymoveit2` on `Fri, 06 Nov 2026 00:55:14 -0000`
+
+The `pymoveit2` package was released.
+
+Version of package(s) in repository `pymoveit2`:
+
+- upstream repository: https://github.com/AndrejOrsula/pymoveit2.git
+- release repository: https://github.com/ros2-gbp/pymoveit2-release.git
+- rosdistro version: `5.0.0-2`
+- old version: `5.0.0-2`
+- new version: `5.1.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.14.4`
+- catkin_pkg version: `1.1.1`
+- rosdep version: `0.27.0`
+- rosdistro version: `1.1.0`
+- vcstools version: `0.1.42`
+
+
 ## pymoveit2 (humble) - 5.1.0-1
 
 The packages in the `pymoveit2` repository were released into the `humble` distro by running `/home/runner/bloom-venv/bin/bloom-release --no-web -y --rosdistro humble --track humble pymoveit2` on `Fri, 06 Nov 2026 00:54:21 -0000`
