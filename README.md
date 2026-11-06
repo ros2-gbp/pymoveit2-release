@@ -1,3 +1,26 @@
+## pymoveit2 (rolling) - 5.1.0-1
+
+The packages in the `pymoveit2` repository were released into the `rolling` distro by running `/home/runner/bloom-venv/bin/bloom-release --no-web -y --rosdistro rolling --track rolling pymoveit2` on `Fri, 06 Nov 2026 00:56:57 -0000`
+
+The `pymoveit2` package was released.
+
+Version of package(s) in repository `pymoveit2`:
+
+- upstream repository: https://github.com/AndrejOrsula/pymoveit2.git
+- release repository: https://github.com/ros2-gbp/pymoveit2-release.git
+- rosdistro version: `5.0.0-1`
+- old version: `5.0.0-1`
+- new version: `5.1.0-1`
+
+Versions of tools used:
+
+- bloom version: `0.14.4`
+- catkin_pkg version: `1.1.1`
+- rosdep version: `0.27.0`
+- rosdistro version: `1.1.0`
+- vcstools version: `0.1.42`
+
+
 ## pymoveit2 (lyrical) - 5.1.0-1
 
 The packages in the `pymoveit2` repository were released into the `lyrical` distro by running `/home/runner/bloom-venv/bin/bloom-release --no-web -y --rosdistro lyrical --track lyrical pymoveit2` on `Fri, 06 Nov 2026 00:55:59 -0000`
