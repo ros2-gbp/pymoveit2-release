@@ -73,14 +73,14 @@ jobs:
           fi
 
       - name: Log in to the GitHub container registry
-        uses: docker/login-action@v4.6.0
+        uses: docker/login-action@v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4.6.0
+        uses: docker/login-action@v4.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKERHUB_PASSWORD }}
@@ -104,7 +104,7 @@ jobs:
 
       - name: Publish the release image
         id: publish
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@v7.4.0
         with:
           context: .
           file: Dockerfile
@@ -121,8 +121,8 @@ jobs:
           IMAGE: ghcr.io/${{ github.repository }}:${{ needs.verify.outputs.version }}-${{ matrix.ros }}
         run: |
           set -euo pipefail
-          docker run --rm --entrypoint bash "${IMAGE,,}" -lc \
-            'source "${WS_INSTALL_DIR}/local_setup.bash" && python3 -c "import pymoveit2; print(pymoveit2.__file__)"'
+          docker run --rm "${IMAGE,,}" \
+            python3 -c "import pymoveit2; print(pymoveit2.__file__)"
 
       - name: Remove local image state
         if: ${{ always() }}
@@ -159,7 +159,7 @@ jobs:
           test -f "dist/pymoveit2-${VERSION}-py3-none-any.whl"
 
       - name: Upload the distributions as build evidence
-        uses: actions/upload-artifact@v7.0.1
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: pypi-distributions
           path: dist
@@ -175,7 +175,7 @@ jobs:
           fi
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@v1.14.2
+        uses: pypa/gh-action-pypi-publish@v1.14.3
         with:
           password: ${{ secrets.PYPI_TOKEN }}
           print-hash: true
